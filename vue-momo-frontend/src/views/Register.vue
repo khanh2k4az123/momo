@@ -1,7 +1,9 @@
+<!-- src/views/Register.vue -->
+
 <template>
-  <div>
+  <div class="register">
     <h2>Đăng Ký</h2>
-    <form @submit.prevent="register">
+    <form @submit.prevent="handleRegister">
       <div>
         <label>Tên:</label>
         <input type="text" v-model="name" required />
@@ -15,19 +17,17 @@
         <input type="password" v-model="password" required />
       </div>
       <div>
-        <label>Nhập Lại Mật Khẩu:</label>
+        <label>Xác Nhận Mật Khẩu:</label>
         <input type="password" v-model="password_confirmation" required />
       </div>
       <button type="submit">Đăng Ký</button>
     </form>
-    <div v-if="errorMessage" style="color: red">
-      {{ errorMessage }}
-    </div>
+    <p v-if="error" class="error">{{ error }}</p>
   </div>
 </template>
 
 <script>
-import apiClient from "../plugins/axios";
+import axios from "axios";
 
 export default {
   name: "Register",
@@ -37,27 +37,30 @@ export default {
       email: "",
       password: "",
       password_confirmation: "",
-      errorMessage: "",
+      error: "",
     };
   },
   methods: {
-    async register() {
+    async handleRegister() {
       try {
-        const response = await apiClient.post("/register", {
+        const response = await axios.post("/register", {
           name: this.name,
           email: this.email,
           password: this.password,
           password_confirmation: this.password_confirmation,
         });
-        localStorage.setItem("access_token", response.data.access_token);
-        this.$router.push("/packages");
-      } catch (error) {
-        if (error.response && error.response.data.errors) {
-          this.errorMessage = Object.values(error.response.data.errors)
-            .flat()
-            .join(" ");
+
+        if (response.data.status === "success") {
+          // Redirect đến trang đăng nhập sau khi đăng ký thành công
+          this.$router.push("/login");
         } else {
-          this.errorMessage = "Có lỗi xảy ra.";
+          this.error = response.data.message || "Đăng ký thất bại.";
+        }
+      } catch (error) {
+        if (error.response && error.response.data) {
+          this.error = error.response.data.message || "Đăng ký thất bại.";
+        } else {
+          this.error = "Có lỗi xảy ra. Vui lòng thử lại.";
         }
       }
     },
@@ -66,5 +69,7 @@ export default {
 </script>
 
 <style scoped>
-/* Thêm kiểu dáng nếu cần */
+.error {
+  color: red;
+}
 </style>

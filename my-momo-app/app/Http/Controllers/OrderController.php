@@ -2,17 +2,30 @@
 
 namespace App\Http\Controllers;
 
-use Illuminate\Http\Request;
+use Carbon\Carbon;
 use App\Models\Order;
 use App\Models\Package;
 use Illuminate\Support\Str;
+use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Log;
-use Carbon\Carbon;
 
 class OrderController extends Controller
 {
+    // MoMo credentials (should be stored in .env for security)
+    private $partnerCode;
+    private $accessKey;
+    private $secretKey;
+
+    public function __construct()
+    {
+        // Initialize MoMo credentials from environment variables
+        $this->partnerCode = env('MOMO_PARTNER_CODE', 'MOMOBKUN20180529');
+        $this->accessKey = env('MOMO_ACCESS_KEY', 'klm05TvNBzhg7h7j');
+        $this->secretKey = env('MOMO_SECRET_KEY', 'at67qH6mk8w5Y1nAyMoYKMWACiEi2bsa');
+    }
+
     /**
-     * Gửi yêu cầu POST đến MoMo.
+     * Send POST request to MoMo API.
      *
      * @param string $url
      * @param array $data
@@ -31,7 +44,7 @@ class OrderController extends Controller
         curl_setopt($ch, CURLOPT_TIMEOUT, 30);
         curl_setopt($ch, CURLOPT_CONNECTTIMEOUT, 30);
 
-        // Thực thi yêu cầu POST
+        // Execute the POST request
         $result = curl_exec($ch);
 
         if (curl_errno($ch)) {
@@ -40,63 +53,64 @@ class OrderController extends Controller
             return null;
         }
 
-        // Đóng kết nối
+        // Close the connection
         curl_close($ch);
         return json_decode($result, true);
     }
 
     /**
-     * Tạo đơn hàng và trả về URL thanh toán MoMo.
+     * Create an order and return MoMo payment URL.
      *
      * @param Request $request
      * @return \Illuminate\Http\JsonResponse
      */
     public function createOrder(Request $request)
     {
-        // Xác thực dữ liệu đầu vào
+        // Validate input data
         $request->validate([
             'package_id' => 'required|exists:packages,id',
             'order_info' => 'required|string|max:255',
             'extra_data' => 'nullable|string|max:255',
         ]);
 
-        // Lấy thông tin gói dịch vụ
+        // Get package information
         $package = Package::find($request->package_id);
 
-        // Tạo đơn hàng mới
-        $order = Order::create([
-            'user_id' => $request->user()->id,
-            'package_id' => $package->id,
-            'order_id' => Str::uuid()->toString(),
-            'amount' => (int) ($package->price * 1000), // Chuyển đổi từ USD sang VND nếu cần
-            'status' => 'pending',
-        ]);
+        // Check if package exists
+        if (!$package) {
+            return response()->json([
+                'status' => 'error',
+                'message' => 'Gói VIP không tồn tại.'
+            ], 404);
+        }
 
-        // Hardcode các biến MoMo
-        $partnerCode = 'MOMOBKUN20180529';
-        $accessKey = 'klm05TvNBzhg7h7j';
-        $secretKey = 'at67qH6mk8w5Y1nAyMoYKMWACiEi2bsa';
-        $orderId = $order->order_id;
+        // Generate order_id
+        $orderId = Str::uuid()->toString();
+
+        // MoMo parameters
+        $partnerCode = $this->partnerCode;
+        $accessKey = $this->accessKey;
+        $secretKey = $this->secretKey;
         $requestId = Str::uuid()->toString();
-        $redirectUrl = 'http://localhost:5173/payment-return'; // Thay bằng URL frontend của bạn
-        $ipnUrl = 'http://127.0.0.1:8000/api/payment/notify'; // Thay bằng URL backend của bạn
-        $amount = (int)$order->amount; // Đảm bảo là số nguyên VND
+        $redirectUrl = 'http://localhost:8000/api/payment/return'; // Backend URL for payment return
+        $ipnUrl = 'http://localhost:8000/api/payment/notify'; // Replace with your Ngrok URL or public URL
+        $amount = (int) $package->price; // Assuming price is in VND
         $orderInfo = $request->order_info;
-        $requestType = "payWithATM"; // Hoặc "captureWallet" tùy vào phương thức thanh toán bạn muốn
+        $requestType = "payWithATM"; // or "captureWallet"
         $extraData = $request->extra_data ?? "";
 
-        // Tạo chuỗi chữ ký
+        // Create signature string
         $rawHash = "accessKey={$accessKey}&amount={$amount}&extraData={$extraData}&ipnUrl={$ipnUrl}&orderId={$orderId}&orderInfo={$orderInfo}&partnerCode={$partnerCode}&redirectUrl={$redirectUrl}&requestId={$requestId}&requestType={$requestType}";
         $signature = hash_hmac("sha256", $rawHash, $secretKey);
 
-        // Tạo payload gửi đến MoMo
+        // Create payload to send to MoMo
         $data = [
             "partnerCode" => $partnerCode,
-            "accessKey" => $accessKey, // Thêm accessKey vào payload
-            "partnerName" => "YourPartnerName", // Bạn có thể thay đổi theo yêu cầu
-            "storeId" => "MomoTestStore", // Bạn có thể thay đổi theo yêu cầu
+            "accessKey" => $accessKey,
+            "partnerName" => "YourPartnerName",
+            "storeId" => "MomoTestStore",
             "requestId" => $requestId,
-            "amount" => $amount, // Số nguyên VND
+            "amount" => $amount,
             "orderId" => $orderId,
             "orderInfo" => $orderInfo,
             "redirectUrl" => $redirectUrl,
@@ -107,24 +121,53 @@ class OrderController extends Controller
             "signature" => $signature
         ];
 
-        // Log dữ liệu gửi đến MoMo để kiểm tra
+        // Log data sent to MoMo for debugging
         Log::info('Sending data to MoMo: ' . json_encode($data));
 
-        // Gửi yêu cầu đến MoMo
+        // Create a new order with all fields from migration, including signature
+        $order = Order::create([
+            'user_id' => $request->user()->id ?? null,
+            'package_id' => $package->id,
+            'order_id' => $orderId,
+            'partner_code' => $partnerCode,
+            'access_key' => $accessKey,
+            'amount' => $amount,
+            'order_info' => $orderInfo,
+            'status' => 'pending',
+            'signature' => $signature,
+            'pay_url' => null, // Will be updated after receiving response from MoMo
+            'trans_id' => null,
+            'message' => null,
+            'local_message' => null,
+            'error_code' => null,
+        ]);
+
+        // Send request to MoMo
         $response = $this->execPostRequest('https://test-payment.momo.vn/v2/gateway/api/create', $data);
 
-        // Log phản hồi từ MoMo để kiểm tra
+        // Log response from MoMo for debugging
         Log::info('Response from MoMo: ' . json_encode($response));
 
         if ($response && isset($response['resultCode']) && $response['resultCode'] == 0) {
-            // Thành công, trả về URL thanh toán
+            // Success, update pay_url
+            $order->pay_url = $response['payUrl'];
+            $order->save();
+
+            // Return payment URL
             return response()->json([
                 'status' => 'success',
                 'payment_url' => $response['payUrl']
             ]);
         } else {
-            // Xử lý lỗi
+            // Handle error
+            $order->message = $response['message'] ?? null;
+            $order->local_message = $response['localMessage'] ?? null;
+            $order->error_code = $response['resultCode'] ?? null;
+            $order->status = 'failed';
+            $order->save();
+
             Log::error('MoMo Payment Error: ' . json_encode($response));
+
             return response()->json([
                 'status' => 'error',
                 'message' => $response['message'] ?? 'Có lỗi xảy ra khi tạo đơn hàng.'
@@ -133,102 +176,189 @@ class OrderController extends Controller
     }
 
     /**
-     * Xử lý trả về từ MoMo sau khi thanh toán.
+     * Handle return from MoMo after payment.
      *
      * @param Request $request
      * @return \Illuminate\Http\JsonResponse
      */
     public function paymentReturn(Request $request)
     {
-        // Lấy thông tin từ URL trả về
+        // Get data from return URL
         $resultCode = $request->input('resultCode');
         $message = $request->input('message');
         $orderId = $request->input('orderId');
-        $requestId = $request->input('requestId');
-
+        $transId = $request->input('transId');
+        $errorCode = $request->input('errorCode');
+        $localMessage = $request->input('localMessage');
+    
+        // Log data received for debugging
+        Log::info('Payment return data: ', $request->all());
+    
+        $order = Order::where('order_id', $orderId)->first();
+    
+        if (!$order) {
+            Log::error('Order not found: ' . $orderId);
+            return redirect('http://localhost:5173/vip-status?status=error&message=Đơn hàng không tồn tại.');
+        }
+    
+        // Update order information
+        $order->trans_id = $transId;
+        $order->message = $message;
+        $order->local_message = $localMessage;
+        $order->error_code = $errorCode;
+    
         if ($resultCode == 0) {
-            // Thanh toán thành công
-            return response()->json([
-                'status' => 'success',
-                'message' => 'Thanh toán thành công!',
-                'orderId' => $orderId,
-                'requestId' => $requestId,
-            ]);
+            // Payment successful
+            $order->status = 'successful';
+            $order->save();
+    
+            // Update user's VIP status
+            $user = $order->user;
+            $package = $order->package;
+    
+            if ($user && $package) {
+                if ($user->vip_expires_at && $user->vip_expires_at->isFuture()) {
+                    // Extend current VIP
+                    $user->vip_expires_at = $user->vip_expires_at->addMonths($package->duration);
+                } else {
+                    // Set new VIP expiration
+                    $user->vip_expires_at = Carbon::now()->addMonths($package->duration);
+                }
+                $user->save();
+    
+                Log::info("User ID {$user->id} VIP updated to {$user->vip_expires_at}");
+            } else {
+                Log::warning('User or package not found for order: ' . $orderId);
+            }
+    
+            // Redirect tới frontend với thông tin thành công
+            return redirect('http://localhost:5173/vip-status?status=success&orderId=' . $order->id);
         } else {
-            // Thanh toán thất bại
-            return response()->json([
-                'status' => 'failed',
-                'message' => 'Thanh toán thất bại: ' . $message,
-                'orderId' => $orderId,
-                'requestId' => $requestId,
-            ], 400);
+            // Payment failed
+            $order->status = 'failed';
+            $order->save();
+    
+            Log::warning('Payment failed for order: ' . $orderId);
+    
+            // Redirect tới frontend với thông tin lỗi
+            return redirect('http://localhost:5173/vip-status?status=error&message=' . urlencode($message));
         }
     }
+    
 
     /**
-     * Xử lý thông báo từ MoMo (IPN).
+     * Handle MoMo IPN (Instant Payment Notification).
      *
      * @param Request $request
      * @return \Illuminate\Http\JsonResponse
      */
     public function paymentNotify(Request $request)
     {
-        // Lấy chữ ký từ MoMo
+        // Log notification received from MoMo
+        Log::info('Received payment notification:', $request->all());
+
+        // Get signature from MoMo
         $signature = $request->input('signature');
+
+        // Create rawHash string for signature verification
         $rawHash = "";
-    
-        // Tạo chuỗi rawHash để xác thực chữ ký
         foreach ($request->all() as $key => $value) {
-            if ($key != 'signature') {
+            if ($key !== 'signature') {
                 $rawHash .= "$key=$value&";
             }
         }
         $rawHash = rtrim($rawHash, "&");
-    
-        // Tạo chữ ký đã mã hóa
-        $secretKey = 'at67qH6mk8w5Y1nAyMoYKMWACiEi2bsa'; // Hardcode secretKey
-        $generatedSignature = hash_hmac("sha256", $rawHash, $secretKey);
-    
-        // So sánh chữ ký
+
+        // Generate signature
+        $generatedSignature = hash_hmac("sha256", $rawHash, $this->secretKey);
+
+        // Compare signatures
         if ($signature === $generatedSignature) {
-            // Xác thực thành công
+            // Signature valid
             $orderId = $request->input('orderId');
             $resultCode = $request->input('resultCode');
-    
+            $transId = $request->input('transId');
+            $errorCode = $request->input('errorCode');
+            $message = $request->input('message');
+            $localMessage = $request->input('localMessage');
+
             $order = Order::where('order_id', $orderId)->first();
-    
+
             if ($order) {
+                // Update order information
+                $order->trans_id = $transId;
+                $order->message = $message;
+                $order->local_message = $localMessage;
+                $order->error_code = $errorCode;
+
                 if ($resultCode == 0) {
-                    $order->status = 'completed';
-                    // Cập nhật VIP cho user
+                    // Payment successful
+                    $order->status = 'successful';
+                    $order->save();
+
+                    // Update user's VIP status
                     $user = $order->user;
-                    if ($user) {
-                        // Kiểm tra nếu người dùng đã có VIP, kéo dài thêm 1 tháng
+                    $package = $order->package;
+
+                    if ($user && $package) {
                         if ($user->vip_expires_at && $user->vip_expires_at->isFuture()) {
-                            $oldVip = $user->vip_expires_at;
-                            $user->vip_expires_at = $user->vip_expires_at->addMonth();
-                            Log::info("User ID {$user->id} VIP extended from {$oldVip} to {$user->vip_expires_at}");
+                            // Extend current VIP
+                            $user->vip_expires_at = $user->vip_expires_at->addMonths($package->duration);
                         } else {
-                            $user->vip_expires_at = Carbon::now()->addMonth();
-                            Log::info("User ID {$user->id} VIP set to {$user->vip_expires_at}");
+                            // Set new VIP expiration
+                            $user->vip_expires_at = Carbon::now()->addMonths($package->duration);
                         }
                         $user->save();
+
+                        Log::info("User ID {$user->id} VIP updated via IPN to {$user->vip_expires_at}");
+                    } else {
+                        Log::warning("User or package not found for Order ID {$order->id}");
                     }
                 } else {
+                    // Payment failed
                     $order->status = 'failed';
-                    Log::info("Order ID {$order->id} status set to failed due to resultCode {$resultCode}");
+                    $order->save();
+
+                    Log::warning("Payment failed in IPN for Order ID {$order->id}, resultCode: {$resultCode}");
                 }
-                $order->save();
             } else {
                 Log::warning("Order not found with orderId {$orderId}");
             }
-    
+
             return response()->json(['message' => 'success']);
         } else {
-            // Xác thực thất bại
+            // Invalid signature
             Log::warning('Invalid signature for MoMo IPN', ['signature' => $signature, 'generated' => $generatedSignature]);
             return response()->json(['message' => 'invalid signature'], 400);
         }
     }
-    
+
+    /**
+     * Cancel an order (Optional: if you want to allow order cancellation).
+     *
+     * @param string $orderId
+     * @param Request $request
+     * @return \Illuminate\Http\JsonResponse
+     */
+    public function cancelOrder($orderId, Request $request)
+    {
+        $order = Order::where('order_id', $orderId)
+                      ->where('user_id', $request->user()->id)
+                      ->first();
+
+        if ($order && $order->status === 'pending') {
+            $order->status = 'failed'; // Alternatively, use 'cancelled' if allowed
+            $order->save();
+
+            return response()->json([
+                'status' => 'success',
+                'message' => 'Đơn hàng đã được hủy thành công.'
+            ]);
+        }
+
+        return response()->json([
+            'status' => 'error',
+            'message' => 'Không thể hủy đơn hàng này.'
+        ], 400);
+    }
 }

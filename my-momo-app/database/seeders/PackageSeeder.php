@@ -1,5 +1,4 @@
 <?php
-
 namespace Database\Seeders;
 
 use Illuminate\Database\Seeder;
@@ -10,18 +9,21 @@ class PackageSeeder extends Seeder
     public function run()
     {
         Package::create([
-            'name' => 'Gói 10',
-            'price' => 10.00,
+            'name' => 'Gói 100000 VNĐ',
+            'price' => 100000, 
+            'duration' => 1,    
         ]);
 
         Package::create([
-            'name' => 'Gói 20',
-            'price' => 20.00,
+            'name' => 'Gói 200000 VNĐ',
+            'price' => 200000,
+            'duration' => 2,   
         ]);
 
         Package::create([
-            'name' => 'Gói 30',
-            'price' => 30.00,
+            'name' => 'Gói 300000 VNĐ',
+            'price' => 300000,
+            'duration' => 3,  
         ]);
     }
 }

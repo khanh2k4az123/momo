@@ -1,10 +1,20 @@
+<!-- src/App.vue -->
+
 <template>
   <div id="app">
     <nav>
       <router-link to="/">Home</router-link> |
-      <router-link to="/register">Đăng Ký</router-link> |
-      <router-link to="/login">Đăng Nhập</router-link> |
-      <router-link to="/packages">Gói Dịch Vụ</router-link>
+      <router-link v-if="!isLoggedIn" to="/register">Đăng Ký</router-link> |
+      <router-link v-if="!isLoggedIn" to="/login">Đăng Nhập</router-link> |
+      <router-link v-if="isLoggedIn" to="/packages">Gói Dịch Vụ</router-link> |
+      <router-link v-if="isLoggedIn" to="/vip-status"
+        >Trạng Thái VIP</router-link
+      >
+      |
+      <router-link v-if="isLoggedIn" to="/purchase-vip">Mua VIP</router-link> |
+      <router-link v-if="isLoggedIn" to="/vip-content"
+        >Nội Dung VIP</router-link
+      >
       <button v-if="isLoggedIn" @click="logout">Đăng Xuất</button>
     </nav>
     <router-view></router-view>
@@ -42,7 +52,6 @@ export default {
   },
 };
 </script>
-
 <style>
 nav {
   padding: 16px;

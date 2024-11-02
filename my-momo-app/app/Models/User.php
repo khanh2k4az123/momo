@@ -18,46 +18,19 @@ class User extends Authenticatable
         'name',
         'email',
         'password',
-        // Các cột bổ sung nếu có
         'vip_expires_at',
-         'email_verified_at',
-        // 'avatar',
-        // 'role',
+        'email_verified_at',
     ];
 
-    /**
-     * The attributes that should be hidden for arrays.
-     *
-     * @var array
-     */
-    protected $hidden = [
-        'password',
-        'remember_token',
-    ];
-
-    /**
-     * The attributes that should be cast to native types.
-     *
-     * @var array
-     */
     protected $casts = [
+        'vip_expires_at' => 'datetime', // Đảm bảo vip_expires_at được cast thành datetime
         'email_verified_at' => 'datetime',
-        'vip_expires_at' => 'datetime', // Cast vip_expires_at thành datetime
     ];
-
-    /**
-     * Kiểm tra xem người dùng có VIP hay không.
-     *
-     * @return bool
-     */
     public function isVip()
     {
-        return $this->vip_expires_at && Carbon::now()->lessThan($this->vip_expires_at);
+        return $this->vip_expires_at && $this->vip_expires_at->isFuture();
     }
 
-    /**
-     * Quan hệ với bảng Orders (nếu có).
-     */
     public function orders()
     {
         return $this->hasMany(Order::class);

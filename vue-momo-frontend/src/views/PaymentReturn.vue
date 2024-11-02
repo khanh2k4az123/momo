@@ -1,13 +1,14 @@
+<!-- src/views/PaymentReturn.vue -->
 <template>
-  <div>
+  <div class="payment-return">
     <h2>Kết Quả Thanh Toán</h2>
     <div v-if="status === 'success'">
       <p>Thanh toán thành công!</p>
-      <p>Mã đơn hàng: {{ orderId }}</p>
+      <router-link to="/vip-status">Xem Trạng Thái VIP</router-link>
     </div>
     <div v-else-if="status === 'failed'">
       <p>Thanh toán thất bại: {{ message }}</p>
-      <p>Mã đơn hàng: {{ orderId }}</p>
+      <router-link to="/purchase-vip">Thử lại</router-link>
     </div>
     <div v-else>
       <p>Đang xử lý...</p>
@@ -16,36 +17,55 @@
 </template>
 
 <script>
+import axios from "axios";
+
 export default {
   name: "PaymentReturn",
   data() {
     return {
       status: "",
       message: "",
-      orderId: "",
     };
   },
-  created() {
-    const urlParams = new URLSearchParams(window.location.search);
-    const resultCode = urlParams.get("resultCode");
-    const message = urlParams.get("message");
-    const orderId = urlParams.get("orderId");
+  methods: {
+    async handlePaymentReturn() {
+      const resultCode = this.$route.query.resultCode;
+      const message = this.$route.query.message;
+      const orderId = this.$route.query.orderId;
+      const requestId = this.$route.query.requestId;
 
-    this.orderId = orderId;
+      if (resultCode === "0" || this.$route.query.status === "success") {
+        this.status = "success";
+        this.message = "Thanh toán thành công!";
+        // Gọi API để lấy VIP status mới
+        await this.updateVipStatus();
+      } else {
+        this.status = "failed";
+        this.message =
+          message || this.$route.query.message || "Thanh toán thất bại.";
+      }
+    },
+    async updateVipStatus() {
+      try {
+        const token = localStorage.getItem("access_token"); // Lấy token từ nơi bạn lưu trữ
+        const response = await axios.get(
+          "http://localhost:8000/api/user/vip-status",
+          {
+            headers: {
+              Authorization: `Bearer ${token}`,
+            },
+          }
+        );
+        console.log("Updated VIP Status:", response.data);
+        // Có thể cập nhật state hoặc Vuex store ở đây
+      } catch (error) {
+        console.error("Error updating VIP status:", error);
+      }
+    },
+  },
 
-    if (resultCode === "0") {
-      this.status = "success";
-      this.message = "Thanh toán thành công!";
-    } else {
-      this.status = "failed";
-      this.message = message || "Thanh toán thất bại.";
-    }
-
-    // Bạn có thể gọi API để lấy thông tin chi tiết thanh toán nếu cần
+  mounted() {
+    this.handlePaymentReturn();
   },
 };
 </script>
-
-<style scoped>
-/* Thêm kiểu dáng nếu cần */
-</style>
